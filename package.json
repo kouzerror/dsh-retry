@@ -1,6 +1,6 @@
 {
   "name": "dsh-retry",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Adds a native “Restart DeepSeek Harness” entry to the Windows tray menu and the account menu.",
   "type": "module",
   "main": "./lib/index.js",
@@ -36,6 +36,12 @@
     "node": ">=22.19.0",
     "dsh": ">=0.2.0-rc.1 <0.3.0-0"
   },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "check": "node scripts/check-syntax.mjs",
+    "build": "node scripts/build-patched.mjs",
+    "verify": "node scripts/verify-patched.mjs"
+  },
   "keywords": [
     "deepseek",
     "deepseek-harness",
@@ -45,5 +51,15 @@
     "tray",
     "windows"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kouzerror/dsh-retry.git"
+  },
+  "homepage": "https://github.com/kouzerror/dsh-retry#readme",
+  "bugs": {
+    "url": "https://github.com/kouzerror/dsh-retry/issues"
+  },
+  "author": "kouzerror",
   "license": "MIT"
 }
+
