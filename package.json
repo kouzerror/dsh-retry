@@ -37,7 +37,7 @@
     "dsh": ">=0.2.0-rc.1 <0.3.0-0"
   },
   "scripts": {
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test test/asar.test.js test/patch.test.js test/desktop-helper.test.js test/index.test.js",
     "check": "node scripts/check-syntax.mjs",
     "build": "node scripts/build-patched.mjs",
     "verify": "node scripts/verify-patched.mjs"
@@ -62,4 +62,3 @@
   "author": "kouzerror",
   "license": "MIT"
 }
-

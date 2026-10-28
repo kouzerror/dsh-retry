@@ -25,4 +25,4 @@ jobs:
       - name: Syntax check
         run: node scripts/check-syntax.mjs
       - name: Unit tests
-        run: node --test test/
+        run: npm test
