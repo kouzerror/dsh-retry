@@ -4,7 +4,8 @@ param(
   [string]$PatchedAsar = '',
   [Parameter(Mandatory = $true)][string]$BackupPath,
   [Parameter(Mandatory = $true)][string]$ExePath,
-  [Parameter(Mandatory = $true)][string]$LogPath
+  [Parameter(Mandatory = $true)][string]$LogPath,
+  [switch]$Detached
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,23 @@ $ErrorActionPreference = 'Stop'
 function Write-Log([string]$Message) {
   $line = '[{0}] {1}' -f (Get-Date).ToString('o'), $Message
   Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}
+
+# Stage 1: the host starts this script as a regular child process. A child is
+# torn down together with its process tree when the app dies, so hand the real
+# work to a process created by WMI, which lives outside that tree.
+if (-not $Detached) {
+  $commandLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $PSCommandPath +
+  '" -MainPid ' + $MainPid +
+  ' -AsarPath "' + $AsarPath +
+  '" -PatchedAsar "' + $PatchedAsar +
+  '" -BackupPath "' + $BackupPath +
+  '" -ExePath "' + $ExePath +
+  '" -LogPath "' + $LogPath +
+  '" -Detached'
+  $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine }
+  Write-Log "detached helper pid=$($result.ProcessId) return=$($result.ReturnValue)"
+  exit 0
 }
 
 Write-Log "helper start mainPid=$MainPid patchedAsar=$PatchedAsar asar=$AsarPath"

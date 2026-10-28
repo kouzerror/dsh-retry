@@ -1,7 +1,8 @@
 node_modules/
-*.asar
+*.asa*
 *.asar.patched
 *.bak
 *.log
+*.tgz
 dist/
-.DS_Store
+
