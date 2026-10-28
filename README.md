@@ -84,7 +84,7 @@ sequenceDiagram
 cd "$env:USERPROFILE\.dsh\profiles\desktop"
 pnpm add file:C:\path\to\dsh-retry
 # 或从 Release 下载后安装
-pnpm add file:C:\path\to\dsh-retry-0.3.0.tgz
+pnpm add file:C:\path\to\dsh-retry-0.3.1.tgz
 
 # 然后在 DSH 设置 → 插件中启用 dsh-retry
 ```
@@ -104,7 +104,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 
 ```json
 {
-  "plugin": { "version": "0.3.0" },
+  "plugin": { "version": "0.3.1" },
   "desktopVersion": "0.2.1-rc.3",
   "patched": true,
   "mainPatched": true,
