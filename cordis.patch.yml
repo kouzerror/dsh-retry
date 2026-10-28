@@ -1,0 +1,6 @@
+# dsh-retry bundle patch: one host row on the Desktop or Web profile.
+# The row name resolves from the profile's own node_modules, where the plugin
+# manager (or `pnpm add`) installed this package.
+- insert:
+    - id: dsh-retry
+      name: dsh-retry
