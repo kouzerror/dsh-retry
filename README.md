@@ -75,7 +75,7 @@ sequenceDiagram
 
 ## 安装
 
-**方式一：DSH 插件市场**（上架审核中）
+**方式一：DSH 插件市场**（正在提交 awesome-dsh-plugin 目录，审核通过后可直接安装）
 
 **方式二：本地目录 / tarball**
 
