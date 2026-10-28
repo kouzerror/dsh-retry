@@ -36,7 +36,7 @@ test('desktopPaths resolves the resources layout on the archive volume', () => {
 
 test('powershellPath is absolute and path-independent', () => {
   const result = powershellPath({ SystemRoot: 'C:\\Windows' });
-  assert.equal(result, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.equal(result, path.win32.join('C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
 });
 
 test('helperArgs passes the expected switches', () => {
