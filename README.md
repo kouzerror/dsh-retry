@@ -48,7 +48,7 @@ DeepSeek Harness 桌面端的托盘菜单与账户菜单都硬编码在安装目
 ```mermaid
 sequenceDiagram
     participant P as dsh-retry (host)
-    participant T as %TEMP%\dsh-retry-build
+    participant T as resources\dsh-retry-build
     participant H as PowerShell helper (WMI)
     participant A as resources\app.asar
 
@@ -109,11 +109,14 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
   "patched": true,
   "mainPatched": true,
   "accountPatched": true,
-  "missing": { "main": [], "account": [] }
+  "missing": { "main": [], "account": [] },
+  "writeAccess": true,
+  "installedArmed": false,
+  "staged": { "path": "...\\dsh-retry-build\\app.asar.patched", "meta": { "desktopVersion": "0.2.1-rc.3" } }
 }
 ```
 
-`patched: true` 且两个 `missing` 为空，表示两处补丁都已生效。
+`patched: true` 且两个 `missing` 为空，表示两处补丁都已生效；`writeAccess` 为 false 时说明当前用户改不了 `resources` 目录，安装/重启会返回 403；`installedArmed` 为 true 表示已有 helper 在等待进程退出安装补丁。
 
 ## 排障
 
@@ -121,7 +124,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 | --- | --- |
 | `/dsh-retry/status` 返回 409 `not_desktop` | 当前不是 Windows 桌面端运行环境，插件在此环境不生效 |
 | `patched: false`，`missing` 非空 | 正常退出一次 DSH 让 helper 安装补丁；或查看下一条日志确认 helper 是否启动 |
-| 退出 DSH 后仍无入口 | 查看 `%TEMP%\dsh-retry-build\restart-helper.log` 与 `restart.log` |
+| 退出 DSH 后仍无入口 | 查看 `resources\dsh-retry-build\restart-helper.log` 与 `restart.log` |
 | 补丁后 DSH 升级，入口消失 | 预期行为；新版本首次启动会自动重新准备补丁，退出一次 DSH 后恢复 |
 | 想还原原始 asar | 退出 DSH，把 `resources\app.asar.dsh-retry.bak` 改名回 `app.asar` |
 | 要彻底卸载 | `pnpm remove dsh-retry`，再按上一条还原 asar（可选） |
@@ -133,7 +136,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 ```powershell
 npm test            # 单元测试（node:test，无需 DSH）
 npm run check       # 全部文件语法检查
-npm run build       # 生成 %TEMP%\dsh-retry-build\app.asar.patched 并深度校验
+npm run build       # 生成 resources\dsh-retry-build\app.asar.patched 并深度校验
 npm run verify      # 对比原始 asar 与补丁版：条目/逐字节差异/语法/哈希
 ```
 
@@ -160,9 +163,11 @@ test/              node:test 测试（asar 读写、补丁幂等、路径/参数
 ## 兼容性与安全
 
 - 仅 **Windows 桌面端**（依赖 `DeepSeek Harness.exe` + `resources/app.asar` 布局）；Web 端返回 `409 not_desktop`。
-- 兼容 DSH `>=0.2.0-rc.1 <0.3.0-0`（见 `dsh.compatibility`）；DSH 内部结构变化导致锚点漂移时，插件会明确报错而不是静默失败。
+- 兼容 DSH `>=0.2.0-rc.1 <0.3.0-0`（以 `engines.dsh` 为准，DSH 只读取该字段）；DSH 内部结构变化导致锚点漂移时，插件会明确报错而不是静默失败。
 - 只修改 `resources/app.asar` 的副本，替换前自动备份为 `app.asar.dsh-retry.bak`；不修改 profile、不联网、不收集数据。
-- Helper 以当前用户权限运行；替换失败会自动保留备份并回退启动原程序。
+- 替换流程：先在同目录写入 `app.asar.dsh-retry.tmp` 并校验大小，再用 `Move-Item -Force` 原子改名为 `app.asar`；中途崩溃只会留下临时文件，不会留下损坏的 asar。
+- helper 只安装与准备时记录一致的补丁（校验 asar 大小与 mtime），DSH 自更新后不会被旧补丁降级；替换失败会回滚备份并启动原程序。
+- 路由会校验请求来源（同源）与 HTTP 方法；非桌面环境返回 409，资源目录不可写返回 403。
 
 ## 版本与同步
 
