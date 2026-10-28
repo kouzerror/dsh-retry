@@ -1,28 +1,18 @@
 {
   "name": "dsh-retry",
-  "version": "0.1.0",
-  "description": "Adds a native “Restart DeepSeek Harness” entry to the Windows tray menu and the account menu, plus a sidebar footer restart button.",
+  "version": "0.2.0",
+  "description": "Adds a native “Restart DeepSeek Harness” entry to the Windows tray menu and the account menu.",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
     ".": {
       "default": "./lib/index.js"
     },
-    "./client": {
-      "default": "./lib/client.js"
-    },
     "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "inject": [
-        "@deepseek-ai/dsh-client-ui-commands",
-        "@deepseek-ai/dsh-client-ui-primitives"
-      ]
     },
     "compatibility": {
       "dsh": ">=0.2.0-rc.1 <0.3.0-0",
@@ -45,10 +35,6 @@
   "engines": {
     "node": ">=22.19.0",
     "dsh": ">=0.2.0-rc.1 <0.3.0-0"
-  },
-  "peerDependencies": {
-    "@deepseek-ai/dsh-client-ui-commands": ">=0.2.0-rc.1 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.2.0-rc.1 <0.3.0-0"
   },
   "keywords": [
     "deepseek",
