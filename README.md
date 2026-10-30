@@ -5,6 +5,7 @@
 [![CI](https://github.com/kouzerror/dsh-retry/actions/workflows/ci.yml/badge.svg)](https://github.com/kouzerror/dsh-retry/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kouzerror/dsh-retry?include_prereleases&sort=semver)](https://github.com/kouzerror/dsh-retry/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![dsh plugin market](https://img.shields.io/badge/dsh%20plugin%20market-listed-2f6feb)](https://awesome-dsh-plugin.com/p/kouzerror/dsh-retry/)
 
 > Adds a native *Restart DeepSeek Harness* action to the Windows tray menu and the account menu. No sidebar widgets, no extra buttons — just the two places where this action belongs.
 
@@ -75,7 +76,7 @@ sequenceDiagram
 
 ## 安装
 
-**方式一：DSH 插件市场**（正在提交 awesome-dsh-plugin 目录，审核通过后可直接安装）
+**方式一：DSH 插件市场** —— 已收录，打开 [dsh 插件市场条目](https://awesome-dsh-plugin.com/p/kouzerror/dsh-retry/)，或在 DSH 的插件市场里搜索 `dsh-retry` 安装。市场按 `github:kouzerror/dsh-retry` 源码安装，之后每次发版会自动提示更新。
 
 **方式二：本地目录 / tarball**
 
@@ -174,6 +175,7 @@ test/              node:test 测试（asar 读写、补丁幂等、路径/参数
 每次插件更新都会：提交并推送代码 → 打 tag → 发布 GitHub Release（`dsh-retry-<version>.tgz`）。
 
 - 仓库：https://github.com/kouzerror/dsh-retry
+- 插件市场：https://awesome-dsh-plugin.com/p/kouzerror/dsh-retry/ （awesome-dsh-plugin 目录收录，按本仓库源码安装，发版后自动提示更新）
 - Releases：https://github.com/kouzerror/dsh-retry/releases
 - 问题反馈：https://github.com/kouzerror/dsh-retry/issues
 
