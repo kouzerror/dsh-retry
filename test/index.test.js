@@ -7,6 +7,7 @@ import {
   autoRestartBudget,
   canWriteResources,
   choosePatchSource,
+  detectForeignPatch,
   ensureBackupFresh,
   ensureInstalled,
   ensureStaged,
@@ -36,11 +37,13 @@ function makePaths() {
     resources,
     asar: path.join(resources, 'app.asar'),
     backup: path.join(resources, 'app.asar.dsh-retry.bak'),
+    backupMeta: path.join(resources, 'app.asar.dsh-retry.bak.meta.json'),
     trigger: path.join(resources, 'dsh-retry.restart'),
     staging,
     stagedAsar: path.join(staging, 'app.asar.patched'),
     stagedMeta: path.join(staging, 'app.asar.patched.meta.json'),
     restartGuard: path.join(staging, 'restart-guard.json'),
+    installRecord: path.join(staging, 'install-record.json'),
     helperLog: path.join(staging, 'restart-helper.log'),
     buildLog: path.join(staging, 'restart.log'),
   };
@@ -417,4 +420,79 @@ test('ensureInstalled reports nothing_to_stage when the live archive is unreadab
   fs.writeFileSync(paths.asar, 'not an asar');
   const result = ensureInstalled(paths, silentLog(), { launch: () => assert.fail('must not launch') });
   assert.equal(result.status, 'nothing_to_stage');
+});
+test('detectForeignPatch compares the live archive against the pristine backup', () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.3.0' });
+  fs.copyFileSync(paths.asar, paths.backup);
+
+  const clean = detectForeignPatch(paths);
+  assert.equal(clean.detected, false);
+  assert.equal(clean.reason, 'matches_pristine_backup');
+
+  // A second plugin edits lib/main.js after our pristine copy was taken.
+  writeAsar(paths.asar, bundleFiles({ version: '0.3.0', main: `${pristineMain()}\n// foreign patch\n` }));
+  const dirty = detectForeignPatch(paths);
+  assert.equal(dirty.detected, true);
+  assert.equal(dirty.reason, 'live_archive_differs_from_the_pristine_backup');
+  assert.notEqual(dirty.liveBytes, dirty.baselineBytes);
+});
+
+test('detectForeignPatch ignores a backup from another desktop build', () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.3.0' });
+  writePristineAsar(paths.backup, { version: '0.2.1-rc.5' });
+
+  const result = detectForeignPatch(paths);
+  assert.equal(result.detected, false);
+  assert.equal(result.reason, 'desktop_version_changed');
+});
+
+test('detectForeignPatch flags a live archive that changed after our install', () => {
+  const paths = makePaths();
+  writePatchedAsar(paths.asar, { version: '0.3.0' });
+  fs.writeFileSync(paths.installRecord, JSON.stringify({ bytes: fs.statSync(paths.asar).size }));
+  assert.equal(detectForeignPatch(paths).detected, false);
+
+  writePatchedAsar(paths.asar, { version: '0.3.0', main: `${pristineMain()}\n// foreign patch` });
+  const result = detectForeignPatch(paths);
+  assert.equal(result.detected, true);
+  assert.equal(result.reason, 'live_archive_differs_from_the_install_record');
+});
+
+test('detectForeignPatch stays quiet without an install record', () => {
+  const paths = makePaths();
+  writePatchedAsar(paths.asar, { version: '0.3.0' });
+
+  const result = detectForeignPatch(paths);
+  assert.equal(result.detected, false);
+  assert.equal(result.reason, 'no_install_record');
+});
+
+test('ensureInstalled leaves a foreign-patched archive untouched', () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.3.0' });
+  fs.copyFileSync(paths.asar, paths.backup);
+  writeAsar(paths.asar, bundleFiles({ version: '0.3.0', main: `${pristineMain()}\n// foreign patch\n` }));
+  const launches = [];
+  const log = silentLog();
+
+  const result = ensureInstalled(paths, log, { launch: (options) => launches.push(options) });
+  assert.equal(result.status, 'foreign_patch_detected');
+  assert.equal(launches.length, 0);
+  assert.equal(fs.existsSync(paths.stagedAsar), false);
+  assert.equal(fs.existsSync(paths.restartGuard), false);
+  assert.match(log.lines.join('\n'), /not touching the installed archive/);
+  assert.equal(statusPayload(paths).foreignPatch.detected, true);
+});
+
+test('ensureStaged records what the pristine backup is', () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.3.0' });
+
+  assert.ok(ensureStaged(paths, silentLog()) !== null);
+  const meta = JSON.parse(fs.readFileSync(paths.backupMeta, 'utf8'));
+  assert.equal(meta.bytes, fs.statSync(paths.backup).size);
+  assert.equal(meta.desktopVersion, '0.3.0');
+  assert.ok(typeof meta.mainSha256 === 'string' && meta.mainSha256.length > 0);
 });

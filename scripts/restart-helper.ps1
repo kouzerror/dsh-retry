@@ -7,6 +7,9 @@ param(
   [Parameter(Mandatory = $true)][string]$LogPath,
   [long]$ExpectedAsarSize = -1,
   [long]$ExpectedAsarMtimeMs = -1,
+  # Written after a successful swap so the next boot can tell "this is the archive
+  # we installed" from "another plugin edited it afterwards".
+  [string]$InstallRecordPath = '',
   # Only set by a caller that verified the live archive is pristine; without it a
   # patched archive must never become the backup that rollback rebuilds from.
   [switch]$CreateBackup,
@@ -257,6 +260,14 @@ try {
           Move-Item -LiteralPath $tmp -Destination $AsarPath -Force
           $installed = $true
           Write-Log "replaced asar attempt=$attempt bytes=$tmpSize"
+          if ($InstallRecordPath) {
+            try {
+              $record = @{ bytes = $tmpSize; at = (Get-Date).ToString('o') } | ConvertTo-Json -Compress
+              [IO.File]::WriteAllText($InstallRecordPath, $record)
+            } catch {
+              Write-Log "could not write the install record: $($_.Exception.Message)"
+            }
+          }
           break
         } catch {
           Write-Log "replace attempt=$attempt failed: $($_.Exception.Message)"
@@ -272,6 +283,7 @@ try {
 
     if (-not $installed) {
       Write-Log 'failed to replace asar after 100 attempts; restoring the pristine backup'
+      if ($InstallRecordPath) { Remove-Item -LiteralPath $InstallRecordPath -Force -ErrorAction SilentlyContinue }
       Restore-Backup | Out-Null
       Start-App
       exit 3

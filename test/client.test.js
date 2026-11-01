@@ -80,7 +80,7 @@ test('factory returns the slots injection and a callable apply', () => {
   assert.equal(typeof result.apply, 'function');
 });
 
-test('apply registers the footer action and the settings page', () => {
+test('apply registers the settings page only', () => {
   const { result } = loadClient();
   const injected = [];
   const registered = [];
@@ -97,18 +97,13 @@ test('apply registers the footer action and the settings page', () => {
     },
   };
   result.apply(ctx);
-  assert.deepEqual(injected, ['sidebar.footer.action', 'settings.section']);
-  assert.equal(registered.length, 2);
-  assert.equal(registered[0].definition.name, 'sidebar.footer.action');
-  assert.equal(registered[0].definition.id, 'dsh-retry-restart');
-  assert.equal(registered[0].definition.order, 90);
-  assert.equal(registered[0].definition.label(), '重启');
-  assert.equal(registered[1].definition.name, 'settings.section');
-  assert.equal(registered[1].definition.id, 'dsh-retry');
-  assert.equal(registered[1].definition.order, 95);
-  assert.equal(registered[1].definition.label(), '重启与更新');
+  assert.deepEqual(injected, ['settings.section']);
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].definition.name, 'settings.section');
+  assert.equal(registered[0].definition.id, 'dsh-retry');
+  assert.equal(registered[0].definition.order, 95);
+  assert.equal(registered[0].definition.label(), '重启与更新');
   assert.equal(typeof registered[0].Component, 'function');
-  assert.equal(typeof registered[1].Component, 'function');
 });
 
 test('slot labels follow the renderer language', () => {
@@ -120,11 +115,10 @@ test('slot labels follow the renderer language', () => {
       register: (definition) => registered.push(definition),
     },
   });
-  assert.equal(registered[0].label(), 'Restart');
-  assert.equal(registered[1].label(), 'Restart & updates');
+  assert.equal(registered[0].label(), 'Restart & updates');
 });
 
-test('footer button renders as an icon button and widens with the sidebar', () => {
+test('settings page renders the restart row and the patch status rows', () => {
   const { result } = loadClient();
   const registered = [];
   result.apply({
@@ -133,30 +127,16 @@ test('footer button renders as an icon button and widens with the sidebar', () =
       register: (definition, Component) => registered.push(Component),
     },
   });
-  const compact = registered[0]({ wide: false });
-  assert.equal(compact.type, 'button');
-  assert.equal(compact.props.className, 'dsh-retry-action');
-  assert.equal(compact.props['aria-label'], '重启 DeepSeek Harness');
-  assert.equal(compact.props.children[1], null);
-
-  const wide = registered[0]({ wide: true });
-  assert.match(wide.props.className, /is-wide/);
-  assert.equal(wide.props.children[1].type, 'span');
-  assert.deepEqual(wide.props.children[1].props.children, ['重启']);
-});
-
-test('settings page renders status rows without throwing', () => {
-  const { result } = loadClient();
-  const registered = [];
-  result.apply({
-    slots: {
-      inject: (name, register) => register(),
-      register: (definition, Component) => registered.push(Component),
-    },
-  });
-  const page = registered[1]({});
+  const page = registered[0]({});
   assert.equal(page.type, 'div');
   assert.equal(page.props.className, 'dsh-retry-page');
+  const [restartCard, statusCard] = page.props.children;
+  const restartButton = restartCard.props.children[0].props.children[1];
+  assert.equal(restartButton.type, 'button');
+  assert.equal(restartButton.props.className, 'dsh-retry-primary');
+  assert.deepEqual(restartButton.props.children, ['重启']);
+  const statusRows = statusCard.props.children[2];
+  assert.ok(statusRows, 'status rows must render once a status payload exists');
 });
 
 test('style tag is injected once with a stable plugin key', () => {
@@ -164,7 +144,12 @@ test('style tag is injected once with a stable plugin key', () => {
   assert.equal(appended.length, 1);
   assert.equal(appended[0].tagName, 'style');
   assert.equal(appended[0].attributes['data-plugin-css'], '@dsh-retry/client');
-  assert.match(appended[0].textContent, /\.dsh-retry-action/);
+  assert.match(appended[0].textContent, /\.dsh-retry-primary/);
+  // The sidebar icon entry is gone; a regression would reintroduce its CSS.
+  assert.doesNotMatch(appended[0].textContent, /\.dsh-retry-action/);
+  // Regression test for the invisible white box: the primary button must use
+  // the inverted label token so it stays readable in both themes.
+  assert.match(appended[0].textContent, /\.dsh-retry-primary\{[^}]*--dsw-alias-label-primary-inverted/);
 
   // Re-evaluating the bundle must not append a second copy.
   const again = loadClient();
@@ -178,6 +163,7 @@ test('failure reasons map to actionable messages', () => {
   assert.match(describeFailure('restart_in_progress'), /进行中/);
   assert.match(describeFailure('resources_not_writable'), /权限/);
   assert.match(describeFailure('nothing_to_install'), /restart\.log/);
+  assert.match(describeFailure('foreign_patch_detected'), /其它插件/);
   assert.match(describeFailure('something_else'), /something_else/);
 });
 
@@ -189,4 +175,11 @@ test('package manifest declares the client half the loader looks for', () => {
   const entry = manifest.exports?.['./client'];
   assert.equal(entry?.default, './lib/client.js', 'client-modules resolves exports["./client"] to a relative path');
   assert.ok(existsSync(path.join(ROOT, 'lib', 'client.js')), 'declared client bundle must exist');
+});
+test('foreign patch is surfaced and can be overridden explicitly', () => {
+  assert.match(SOURCE, /foreign_patch_detected/);
+  assert.match(SOURCE, /仍然覆盖并重启/);
+  assert.match(SOURCE, /force=1/);
+  assert.match(SOURCE, /foreignPatch\?\.detected/);
+  assert.match(SOURCE, /其它插件补丁/);
 });

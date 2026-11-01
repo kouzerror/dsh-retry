@@ -7,7 +7,7 @@ import { createRestartHandler } from '../lib/index.js';
 import { MAIN_ENTRY } from '../lib/patch.js';
 import { createLogger, readTail } from '../lib/log.js';
 import { writeAsar } from './fixtures/write-asar.mjs';
-import { pristineMain, writePatchedAsar, writePristineAsar } from './fixtures/pristine-bundle.mjs';
+import { bundleFiles, pristineMain, writePatchedAsar, writePristineAsar } from './fixtures/pristine-bundle.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-retry-route-'));
 
@@ -20,11 +20,13 @@ function makePaths() {
     resources,
     asar: path.join(resources, 'app.asar'),
     backup: path.join(resources, 'app.asar.dsh-retry.bak'),
+    backupMeta: path.join(resources, 'app.asar.dsh-retry.bak.meta.json'),
     trigger: path.join(resources, 'dsh-retry.restart'),
     staging,
     stagedAsar: path.join(staging, 'app.asar.patched'),
     stagedMeta: path.join(staging, 'app.asar.patched.meta.json'),
     restartGuard: path.join(staging, 'restart-guard.json'),
+    installRecord: path.join(staging, 'install-record.json'),
     helperLog: path.join(staging, 'restart-helper.log'),
     buildLog: path.join(staging, 'restart.log'),
   };
@@ -188,4 +190,43 @@ test('restart route reports nothing_to_install when no source is available', asy
   assert.equal(res.statusCode, 500);
   assert.deepEqual(res.body, { ok: false, error: 'nothing_to_install' });
   assert.match(readTail(paths.buildLog, 10).join('\n'), /no patch could be staged/);
+});
+
+test('restart route refuses to overwrite a patch another plugin wrote', async () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.3.0' });
+  fs.copyFileSync(paths.asar, paths.backup);
+  // A second plugin edits lib/main.js after our pristine copy was taken.
+  writeAsar(paths.asar, bundleFiles({ version: '0.3.0', main: `${pristineMain()}\n// foreign patch\n` }));
+  const backupBytes = fs.statSync(paths.backup).size;
+  const launches = [];
+  const { handler, restarting } = createRestartHandler({ launch: (options) => launches.push(options), logger: createLogger });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 409);
+  assert.equal(res.body.error, 'foreign_patch_detected');
+  assert.equal(launches.length, 0);
+  assert.equal(restarting.value, false);
+  // The pristine backup must not be replaced by the foreign-patched archive.
+  assert.equal(fs.statSync(paths.backup).size, backupBytes);
+  assert.equal(fs.existsSync(paths.backupMeta), false);
+});
+
+test('restart route overwrites a foreign patch when forced', async () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.3.0' });
+  fs.copyFileSync(paths.asar, paths.backup);
+  writeAsar(paths.asar, bundleFiles({ version: '0.3.0', main: `${pristineMain()}\n// foreign patch\n` }));
+  const backupBytes = fs.statSync(paths.backup).size;
+  const launches = [];
+  const { handler } = createRestartHandler({ launch: (options) => launches.push(options), logger: createLogger });
+
+  const res = fakeResponse();
+  await handler(request({ url: '/dsh-retry/restart?force=1' }), res, paths);
+  assert.equal(res.statusCode, 202);
+  assert.equal(res.body.mode, 'patch-and-restart');
+  assert.equal(launches.length, 1);
+  // Forcing never promotes a foreign-patched archive into the pristine backup.
+  assert.equal(fs.statSync(paths.backup).size, backupBytes);
 });

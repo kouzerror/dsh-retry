@@ -1,9 +1,9 @@
 Adds `kouzerror/dsh-retry` (ui): a native **Restart DeepSeek Harness** entry in two places the
 existing restart plugins do not cover — the Windows **system tray menu** and the **account menu**
-(avatar popup) — plus official renderer slots (sidebar footer action and a settings page) that keep
+(avatar popup) — plus an official renderer slot (a settings page) that keeps
 working after a desktop update, and a patch lifecycle that survives desktop updates.
 
-- Official `sidebar.footer.action` and `settings.section` entries from the plugin's own client bundle
+- Official `settings.section` entry from the plugin's own client bundle
   (`dsh.client`, no app.asar dependency), so restart stays available even when an update wipes the patch.
 - Patched `resources/app.asar` is prepared at startup and installed by a short-lived helper that
   restarts the app once (original kept as `app.asar.dsh-retry.bak`); a running Electron app keeps the
