@@ -75,3 +75,23 @@ test('readAsar rejects files that are not asar archives', () => {
   fs.writeFileSync(file, Buffer.alloc(64, 7));
   assert.throws(() => readAsar(file), /invalid asar lead/);
 });
+
+test('rebuild keeps the archive header free of internal bookkeeping', () => {
+  const source = path.join(tmp, 'clean-source.asar');
+  writeAsar(source, new Map(Object.entries(fixture())));
+  const out = path.join(tmp, 'clean-out.asar');
+  rebuildAsar(source, out, new Map([['a.txt', Buffer.from('patched!\n')]]));
+
+  const archive = readAsar(out);
+  try {
+    const entries = listFiles(archive.tree);
+    assert.ok(entries.length > 0);
+    for (const entry of entries) {
+      // newSize/newOffset used to leak from the rebuild bookkeeping into the JSON
+      // header; a future Electron may reject unknown keys.
+      assert.deepEqual(Object.keys(entry).sort(), ['integrity', 'offset', 'path', 'size']);
+    }
+  } finally {
+    closeAsar(archive);
+  }
+});

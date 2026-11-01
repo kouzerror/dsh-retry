@@ -3,8 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { desktopPaths, powershellPath } from '../lib/desktop.js';
 import { helperArgs, helperScript } from '../lib/helper.js';
+
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const makeDesktop = () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-retry-desktop-'));
@@ -59,4 +62,30 @@ test('helperArgs passes the expected switches', () => {
 
 test('helperScript lives in the package scripts directory', () => {
   assert.equal(helperScript('/pkg'), path.join('/pkg', 'scripts', 'restart-helper.ps1'));
+});
+
+test('helperArgs forwards the backup-creation switch only when asked', () => {
+  const paths = { asar: 'A', backup: 'B', exe: 'C', helperLog: 'L' };
+  const base = { script: 'S.ps1', mainPid: 42, paths, staged: 'P.asar' };
+  assert.equal(helperArgs(base).includes('-CreateBackup'), false);
+  assert.equal(helperArgs({ ...base, createBackup: true }).includes('-CreateBackup'), true);
+});
+
+test('helper script only creates a backup on request and survives a failed swap', () => {
+  const script = fs.readFileSync(helperScript(ROOT), 'utf8');
+  // A patched live archive must never become the pristine backup: the Node side
+  // passes -CreateBackup only after it verified the archive is unpatched.
+  assert.ok(script.includes('if ($CreateBackup -and -not (Test-Path -LiteralPath $BackupPath))'));
+  // The freshness check has to run before the app is stopped, otherwise a stale
+  // request costs the user a restart for nothing.
+  assert.ok(script.indexOf('leaving the app alone') < script.indexOf('stopping main process'));
+  // Any failure after the stop has to bring DSH back.
+  assert.ok(script.includes('$script:appStopped = $true'));
+  assert.ok(script.includes('if ($script:appStopped) {'));
+  // Helpers killed mid-copy leave ~180 MB temp files; they must be swept up.
+  assert.ok(script.includes("'.dsh-retry.*.tmp'"));
+  assert.ok(script.includes('Remove-StaleTemp'));
+  // ... and a swap failure path must remove the helper's own temp copy.
+  assert.ok(script.includes('finally {'));
+  assert.ok(script.includes("$tmp = $AsarPath + '.dsh-retry.' + $PID + '.tmp'"));
 });
