@@ -31,7 +31,7 @@ test('desktopPaths resolves the resources layout on the archive volume', () => {
   // Staging must live next to the archive so the swap stays on one volume.
   assert.equal(paths.staging, path.join(resources, 'dsh-retry-build'));
   assert.equal(paths.stagedAsar, path.join(resources, 'dsh-retry-build', 'app.asar.patched'));
-  assert.equal(paths.marker, path.join(resources, 'dsh-retry-build', 'install-armed.json'));
+  assert.equal(paths.restartGuard, path.join(resources, 'dsh-retry-build', 'restart-guard.json'));
 });
 
 test('powershellPath is absolute and path-independent', () => {
@@ -45,22 +45,16 @@ test('helperArgs passes the expected switches', () => {
     backup: 'B',
     exe: 'C',
     helperLog: 'L',
-    marker: 'M',
   };
   const base = { script: 'S.ps1', mainPid: 42, paths, staged: 'P.asar' };
   const normal = helperArgs(base);
-  assert.equal(normal.includes('-InstallOnly'), false);
   assert.equal(normal[normal.indexOf('-MainPid') + 1], '42');
   assert.equal(normal[normal.indexOf('-PatchedAsar') + 1], 'P.asar');
   assert.equal(normal[normal.indexOf('-LogPath') + 1], 'L');
-  assert.equal(normal[normal.indexOf('-MarkerPath') + 1], 'M');
 
   const withExpected = helperArgs({ ...base, expected: { size: 100, mtimeMs: 1234.9 } });
   assert.equal(withExpected[withExpected.indexOf('-ExpectedAsarSize') + 1], '100');
   assert.equal(withExpected[withExpected.indexOf('-ExpectedAsarMtimeMs') + 1], '1234');
-
-  const installOnly = helperArgs({ ...base, installOnly: true });
-  assert.equal(installOnly.at(-1), '-InstallOnly');
 });
 
 test('helperScript lives in the package scripts directory', () => {

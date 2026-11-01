@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { readTail, createLogger } from '../lib/log.js';
-import { statusPayload } from '../lib/index.js';
+import { autoRestartBudget, statusPayload } from '../lib/index.js';
 import { writeAsar } from './fixtures/write-asar.mjs';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-retry-status-'));
@@ -18,7 +18,7 @@ function fakePaths() {
     helperLog: path.join(tmp, 'helper.log'),
     buildLog: path.join(tmp, 'build.log'),
     staging: tmp,
-    marker: path.join(tmp, 'install-armed.json'),
+    restartGuard: path.join(tmp, 'restart-guard.json'),
     trigger: path.join(tmp, 'trigger'),
     exe: path.join(tmp, 'DeepSeek Harness.exe'),
   };
@@ -47,7 +47,8 @@ test('statusPayload reports an unpatched archive without throwing', () => {
   assert.equal(payload.staged, null);
   assert.equal(payload.backup.exists, false);
   assert.equal(typeof payload.writeAccess, 'boolean');
-  assert.equal(payload.installedArmed, false);
+  assert.equal(payload.autoRestart.limit, 2);
+  assert.equal(payload.autoRestart.guard, null);
 });
 
 test('statusPayload surfaces a staged archive and its meta', () => {
@@ -61,13 +62,16 @@ test('statusPayload surfaces a staged archive and its meta', () => {
   assert.equal(payload.staged.meta.desktopVersion, '0.2.1-rc.3');
 });
 
-test('statusPayload reports an armed install helper via the marker', () => {
+test('autoRestartBudget only spends attempts on the same archive signature', () => {
   const paths = fakePaths();
   writeAsar(paths.asar, new Map([['index.html', '<html></html>']]));
-  fs.writeFileSync(paths.marker, JSON.stringify({ mainPid: process.ppid, helperPid: process.pid }));
-  assert.equal(statusPayload(paths).installedArmed, true);
-  fs.writeFileSync(paths.marker, JSON.stringify({ mainPid: process.ppid, helperPid: 999999 }));
-  assert.equal(statusPayload(paths).installedArmed, false);
+  assert.deepEqual(autoRestartBudget(paths, 'sig-a'), { signature: 'sig-a', attempts: 0, exhausted: false });
+
+  fs.writeFileSync(paths.restartGuard, JSON.stringify({ signature: 'sig-a', attempts: 2 }));
+  assert.equal(autoRestartBudget(paths, 'sig-a').exhausted, true);
+  // A new DSH build has a new signature, so it gets its own budget.
+  assert.equal(autoRestartBudget(paths, 'sig-b').exhausted, false);
+  assert.equal(statusPayload(paths).autoRestart.guard.signature, 'sig-a');
 });
 
 test('readTail returns the newest log lines and tolerates missing files', () => {

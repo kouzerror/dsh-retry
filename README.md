@@ -33,7 +33,7 @@
 
 点击后是**优雅重启**：走 `app.relaunch()`，先正常退出再自动重开，不会硬杀进程、不丢会话。
 
-> 0.2.0 起已移除早期版本的侧栏引导按钮。安装后无需找按钮：正常退出一次 DSH 再重开，两个入口就会出现。
+> 0.2.0 起已移除早期版本的侧栏引导按钮。0.4.0 起补丁改为**启动自愈**：DSH 升级覆盖 `app.asar` 后，插件会在启动约 3 秒后自动重启一次 DSH 完成重装，两个入口随即出现，不需要手动退出。
 
 ## 为什么需要核心补丁
 
@@ -54,18 +54,21 @@ sequenceDiagram
     participant A as resources\app.asar
 
     P->>P: 启动 3s 后检查补丁状态
-    alt app.asar 未补丁
+    alt app.asar 未补丁（例如 DSH 刚升级）
         P->>A: 读取 app.asar（original-fs）
         P->>P: 在内存中修改 lib/main.js + 账户菜单 bundle
         P->>T: 重建并校验 app.asar.patched
-        P->>H: 启动 InstallOnly helper（经 WMI 脱离进程树）
-        Note over H: 等待 DSH 正常退出（最多 7 天）
+        P->>H: 启动 restart helper（经 WMI 脱离进程树）
+        H->>A: taskkill 主进程及其子进程
         H->>A: 备份 app.asar.dsh-retry.bak → 替换为补丁版
-        Note over A: 下次启动即可看到两个入口
-    else app.asar 已补丁
+        H->>A: 重新拉起 DeepSeek Harness.exe
+        Note over A: 重启后的实例直接带两个入口
+    else app.asar 已补丁且与暂存版一致
         P->>P: 不做任何文件修改
     end
 ```
+
+为什么是「重启一次」而不是「退出时装」：DSH 运行期间始终持有 `app.asar` 的句柄（不带 `FILE_SHARE_DELETE`），改名覆盖会被系统拒绝；而一个常驻后台、等 DSH 退出再替换的 helper 在这台机器上会被清掉（0.3.x 的失效原因）。短命的 restart helper 先杀掉进程再替换，是唯一实测可行的路径。同一份 asar 最多自动重启 2 次（`dsh-retry-build/restart-guard.json`），避免坏补丁导致反复重启。
 
 补丁只改两个文件，重建后的 asar 与原始文件除这两个文件外**逐字节一致**（`npm run verify` 会做全量 deep 校验）。
 
@@ -85,14 +88,14 @@ sequenceDiagram
 cd "$env:USERPROFILE\.dsh\profiles\desktop"
 pnpm add file:C:\path\to\dsh-retry
 # 或从 Release 下载后安装
-pnpm add file:C:\path\to\dsh-retry-0.3.1.tgz
+pnpm add file:C:\path\to\dsh-retry-0.4.0.tgz
 
 # 然后在 DSH 设置 → 插件中启用 dsh-retry
 ```
 
 > 用 `file:` 安装时 pnpm 会**复制**目录而不是软链，更新源码后需要重新安装（`remove_bundle` → `install_bundle`）才会生效。
 
-安装完成后：**托盘 → 退出 DeepSeek Harness，再重新打开**。插件会在退出时安装补丁，下次启动后两个入口就位。
+安装完成后：**托盘 → 退出 DeepSeek Harness，再重新打开**。新版本首次启动约 3 秒后会自动重启一次 DSH 把补丁装进 `app.asar`，重启后两个入口就位。
 
 ## 验证安装
 
@@ -105,28 +108,29 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 
 ```json
 {
-  "plugin": { "version": "0.3.1" },
-  "desktopVersion": "0.2.1-rc.3",
+  "plugin": { "version": "0.4.0" },
+  "desktopVersion": "0.2.1-rc.5",
   "patched": true,
   "mainPatched": true,
   "accountPatched": true,
   "missing": { "main": [], "account": [] },
   "writeAccess": true,
-  "installedArmed": false,
+  "autoRestart": { "limit": 2, "guard": null },
   "staged": { "path": "...\\dsh-retry-build\\app.asar.patched", "meta": { "desktopVersion": "0.2.1-rc.3" } }
 }
 ```
 
-`patched: true` 且两个 `missing` 为空，表示两处补丁都已生效；`writeAccess` 为 false 时说明当前用户改不了 `resources` 目录，安装/重启会返回 403；`installedArmed` 为 true 表示已有 helper 在等待进程退出安装补丁。
+`patched: true` 且两个 `missing` 为空，表示两处补丁都已生效；`writeAccess` 为 false 时说明当前用户改不了 `resources` 目录，安装/重启会返回 403；`autoRestart.guard` 记录当前 asar 签名已用掉的自动重启次数（上限 `limit`），非 null 说明这次安装已经自动重启过。
 
 ## 排障
 
 | 现象 | 处理 |
 | --- | --- |
 | `/dsh-retry/status` 返回 409 `not_desktop` | 当前不是 Windows 桌面端运行环境，插件在此环境不生效 |
-| `patched: false`，`missing` 非空 | 正常退出一次 DSH 让 helper 安装补丁；或查看下一条日志确认 helper 是否启动 |
-| 退出 DSH 后仍无入口 | 查看 `resources\dsh-retry-build\restart-helper.log` 与 `restart.log` |
-| 补丁后 DSH 升级，入口消失 | 预期行为；新版本首次启动会自动重新准备补丁，退出一次 DSH 后恢复 |
+| `patched: false`，`missing` 非空 | 启动后约 3 秒会自动重启一次装补丁；若反复不生效，看 `autoRestart.guard.attempts` 是否已到上限（`limit`） |
+| 自动重启后仍无入口 | 查看 `resources\dsh-retry-build\restart-helper.log` 与 `restart.log` |
+| 补丁后 DSH 升级，入口消失 | 预期行为；新版本首次启动会自动重启一次，重启后恢复 |
+| `autoRestart.guard.attempts` 到上限 | 说明补丁连续安装失败，已停止自动重启以免循环；修好根因后删除 `resources\dsh-retry-build\restart-guard.json` 再启动 |
 | 想还原原始 asar | 退出 DSH，把 `resources\app.asar.dsh-retry.bak` 改名回 `app.asar` |
 | 要彻底卸载 | `pnpm remove dsh-retry`，再按上一条还原 asar（可选） |
 
@@ -149,8 +153,8 @@ lib/patch.js       托盘菜单 / 账户菜单 / 重启监听三处补丁（逐�
 lib/desktop.js     桌面端路径解析（exe、resources、staging、备份）
 lib/helper.js      PowerShell helper 参数构造与拉起
 lib/log.js         append-only 日志与尾部读取
-lib/index.js       host 插件：status / prepare / restart 路由 + 启动时 arm
-scripts/restart-helper.ps1  退出后替换 asar（WMI 脱离进程树；可选重启/仅安装）
+lib/index.js       host 插件：status / prepare / restart 路由 + 启动自愈
+scripts/restart-helper.ps1  短暂 helper：杀进程 → 替换 asar → 重新拉起（WMI 脱离进程树）
 test/              node:test 测试（asar 读写、补丁幂等、路径/参数构造、status payload）
 ```
 
@@ -158,7 +162,7 @@ test/              node:test 测试（asar 读写、补丁幂等、路径/参数
 
 - **幂等**：每个补丁点都有独立 marker，已补丁的 asar 再跑补丁是 no-op；旧版本打过的半补丁能被新版本补齐而不重复插入。
 - **失败要响**：锚点找不到或重复时直接抛错，绝不写出半补丁；重建后强制深度校验。
-- **不在运行时改文件**：`app.asar` 只在 DSH 退出后由 helper 替换，避免破坏运行中的进程。
+- **不在运行时改文件**：`app.asar` 只在 DSH 主进程退出后由 helper 替换（运行中它被句柄锁住，改名会被拒），避免破坏运行中的进程。
 - **可诊断**：所有状态和失败原因都能从 `/dsh-retry/status` 与两个日志文件里读到。
 
 ## 兼容性与安全
@@ -166,7 +170,7 @@ test/              node:test 测试（asar 读写、补丁幂等、路径/参数
 - 仅 **Windows 桌面端**（依赖 `DeepSeek Harness.exe` + `resources/app.asar` 布局）；Web 端返回 `409 not_desktop`。
 - 兼容 DSH `>=0.2.0-rc.1 <0.3.0-0`（以 `engines.dsh` 为准，DSH 只读取该字段）；DSH 内部结构变化导致锚点漂移时，插件会明确报错而不是静默失败。
 - 只修改 `resources/app.asar` 的副本，替换前自动备份为 `app.asar.dsh-retry.bak`；不修改 profile、不联网、不收集数据。
-- 替换流程：先在同目录写入 `app.asar.dsh-retry.tmp` 并校验大小，再用 `Move-Item -Force` 原子改名为 `app.asar`；中途崩溃只会留下临时文件，不会留下损坏的 asar。
+- 替换流程：先在同目录写入 `app.asar.dsh-retry.<pid>.tmp` 并校验大小，再用 `Move-Item -Force` 原子改名为 `app.asar`；中途崩溃只会留下临时文件，不会留下损坏的 asar。
 - helper 只安装与准备时记录一致的补丁（校验 asar 大小与 mtime），DSH 自更新后不会被旧补丁降级；替换失败会回滚备份并启动原程序。
 - 路由会校验请求来源（同源）与 HTTP 方法；非桌面环境返回 409，资源目录不可写返回 403。
 
