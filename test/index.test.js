@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,8 @@ import {
   autoRestartBudget,
   canWriteResources,
   choosePatchSource,
+  createRestartHandler,
+  createUpdateHandlers,
   detectForeignPatch,
   ensureBackupFresh,
   ensureInstalled,
@@ -44,6 +47,7 @@ function makePaths() {
     stagedMeta: path.join(staging, 'app.asar.patched.meta.json'),
     restartGuard: path.join(staging, 'restart-guard.json'),
     installRecord: path.join(staging, 'install-record.json'),
+    updatePending: path.join(staging, 'update-pending.json'),
     helperLog: path.join(staging, 'restart-helper.log'),
     buildLog: path.join(staging, 'restart.log'),
   };
@@ -54,6 +58,43 @@ function silentLog() {
   const log = (message) => lines.push(String(message));
   log.lines = lines;
   return log;
+}
+
+const quietLogger = () => Object.assign(() => {}, { file: null });
+
+const PACKAGE_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+function fakeResponse() {
+  return {
+    statusCode: 0,
+    headers: {},
+    headersSent: false,
+    setHeader(name, value) {
+      this.headers[name] = value;
+    },
+    end(body) {
+      if (this.headersSent) throw new Error('response already ended');
+      this.headersSent = true;
+      this.raw = body;
+      this.body = body === undefined ? undefined : JSON.parse(body);
+    },
+  };
+}
+
+function request(overrides = {}) {
+  return { method: 'POST', headers: { 'sec-fetch-site': 'same-origin' }, ...overrides };
+}
+
+function updateRelease(overrides = {}) {
+  return {
+    version: '7.9.0',
+    tag: 'v7.9.0',
+    publishedAt: '2026-10-01T00:00:00Z',
+    htmlUrl: 'https://github.com/kouzerror/dsh-retry/releases/tag/v7.9.0',
+    notes: 'notes',
+    asset: { name: 'dsh-retry-7.9.0.tgz', size: 4, digest: null, url: 'https://example.invalid/dsh-retry-7.9.0.tgz' },
+    ...overrides,
+  };
 }
 
 function liveSignature(paths) {
@@ -495,4 +536,311 @@ test('ensureStaged records what the pristine backup is', () => {
   assert.equal(meta.bytes, fs.statSync(paths.backup).size);
   assert.equal(meta.desktopVersion, '0.3.0');
   assert.ok(typeof meta.mainSha256 === 'string' && meta.mainSha256.length > 0);
+});
+
+test('update route reports the latest release and whether it is newer', async () => {
+  const { handler } = createUpdateHandlers({ fetchLatest: async () => updateRelease() });
+  const res = fakeResponse();
+  await handler({ method: 'GET', headers: {} }, res, makePaths());
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+  assert.deepEqual(res.body.current, { version: PACKAGE_VERSION });
+  assert.equal(res.body.latest.version, '7.9.0');
+  assert.equal(res.body.latest.tag, 'v7.9.0');
+  assert.equal(res.body.latest.asset.name, 'dsh-retry-7.9.0.tgz');
+  assert.equal(res.body.updateAvailable, true);
+  assert.equal('error' in res.body, false);
+});
+
+test('update route reports no update when the release is not newer', async () => {
+  const { handler } = createUpdateHandlers({
+    fetchLatest: async () => updateRelease({ version: PACKAGE_VERSION, tag: `v${PACKAGE_VERSION}` }),
+  });
+  const res = fakeResponse();
+  await handler({ method: 'GET', headers: {} }, res, makePaths());
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.updateAvailable, false);
+  assert.equal(res.body.latest.version, PACKAGE_VERSION);
+});
+
+test('update route answers 200 with the error when the release check fails', async () => {
+  const { handler } = createUpdateHandlers({
+    fetchLatest: async () => {
+      throw new Error('api rate limit exceeded');
+    },
+  });
+  const res = fakeResponse();
+  await handler({ method: 'GET', headers: {} }, res, makePaths());
+
+  // A failed lookup must not turn the settings page into a 5xx.
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.latest, null);
+  assert.equal(res.body.updateAvailable, false);
+  assert.equal(res.body.error, 'api rate limit exceeded');
+});
+
+test('update route installs a newer release, marks it pending and latches', async () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.2.0' });
+  const payload = Buffer.from('pretend tarball');
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`;
+  const unpacked = path.join(paths.resources, 'unpacked');
+  const prepares = [];
+  const installs = [];
+  let cleanups = 0;
+  const { handler, updating } = createUpdateHandlers({
+    root: path.join(paths.resources, 'plugin-root'),
+    tmpDir: fs.mkdtempSync(path.join(root, 'tmp-')),
+    logger: quietLogger,
+    fetchLatest: async () =>
+      updateRelease({
+        asset: { name: 'dsh-retry-7.9.0.tgz', size: payload.length, digest, url: 'https://example.invalid/dsh-retry-7.9.0.tgz' },
+      }),
+    fetchImpl: async () => new Response(payload),
+    prepare: ({ tarball }) => {
+      prepares.push({ tarball });
+      return {
+        sourceDir: unpacked,
+        manifest: { name: 'dsh-retry', version: '7.9.0', engines: { dsh: '>=0.2.0-rc.1 <0.3.0-0', node: '>=22' } },
+        cleanup: () => {
+          cleanups += 1;
+        },
+      };
+    },
+    install: ({ sourceDir, root: targetRoot }) => {
+      installs.push({ sourceDir, root: targetRoot });
+      return { version: '7.9.0' };
+    },
+  });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true, installed: { from: PACKAGE_VERSION, to: '7.9.0' }, restartRequired: true });
+  assert.equal(prepares.length, 1);
+  assert.deepEqual(fs.readFileSync(prepares[0].tarball), payload);
+  assert.equal(cleanups, 1);
+  assert.equal(installs.length, 1);
+  assert.equal(installs[0].sourceDir, unpacked);
+  assert.equal(installs[0].root, path.join(paths.resources, 'plugin-root'));
+
+  const marker = JSON.parse(fs.readFileSync(paths.updatePending, 'utf8'));
+  assert.equal(marker.version, '7.9.0');
+  assert.ok(typeof marker.installedAt === 'string');
+  assert.equal(updating.value, true);
+
+  // A second click must not install a second copy while the app still runs.
+  const again = fakeResponse();
+  await handler(request(), again, paths);
+  assert.equal(again.statusCode, 409);
+  assert.deepEqual(again.body, { ok: false, error: 'update_in_progress' });
+  assert.equal(installs.length, 1);
+});
+
+test('update route refuses a release the running desktop cannot load', async () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.2.0' });
+  const payload = Buffer.from('next major');
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`;
+  let cleanups = 0;
+  const { handler, updating } = createUpdateHandlers({
+    tmpDir: fs.mkdtempSync(path.join(root, 'tmp-')),
+    logger: quietLogger,
+    fetchLatest: async () =>
+      updateRelease({
+        asset: { name: 'dsh-retry-7.9.0.tgz', size: payload.length, digest, url: 'https://example.invalid/dsh-retry-7.9.0.tgz' },
+      }),
+    fetchImpl: async () => new Response(payload),
+    prepare: () => ({
+      sourceDir: path.join(paths.resources, 'unpacked'),
+      manifest: { name: 'dsh-retry', version: '7.9.0', engines: { dsh: '>=0.3.0 <0.4.0' } },
+      cleanup: () => {
+        cleanups += 1;
+      },
+    }),
+    install: () => assert.fail('an incompatible update must not install'),
+  });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    ok: false,
+    error: 'incompatible_update',
+    detail: '>=0.3.0 <0.4.0 vs 0.2.0',
+  });
+  assert.equal(fs.existsSync(paths.updatePending), false);
+  assert.equal(updating.value, false);
+  assert.equal(cleanups, 1);
+});
+
+test('update route installs when the engine range cannot be verified', async () => {
+  const paths = makePaths();
+  writePristineAsar(paths.asar, { version: '0.2.0' });
+  const payload = Buffer.from('unknown range');
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`;
+  const { handler } = createUpdateHandlers({
+    tmpDir: fs.mkdtempSync(path.join(root, 'tmp-')),
+    fetchLatest: async () =>
+      updateRelease({
+        asset: { name: 'dsh-retry-7.9.0.tgz', size: payload.length, digest, url: 'https://example.invalid/dsh-retry-7.9.0.tgz' },
+      }),
+    fetchImpl: async () => new Response(payload),
+    prepare: () => ({
+      sourceDir: path.join(paths.resources, 'unpacked'),
+      manifest: { name: 'dsh-retry', version: '7.9.0', engines: { dsh: '^0.3.0' } },
+      cleanup: () => {},
+    }),
+    install: () => ({ version: '7.9.0' }),
+  });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 200);
+  assert.equal(fs.existsSync(paths.updatePending), true);
+  assert.match(readTail(paths.buildLog, 10).join('\n'), /could not verify engine compatibility: \^0\.3\.0/);
+});
+
+test('update route skips the engine check without a desktop version', async () => {
+  const paths = makePaths();
+  const payload = Buffer.from('no asar');
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`;
+  const { handler } = createUpdateHandlers({
+    tmpDir: fs.mkdtempSync(path.join(root, 'tmp-')),
+    fetchLatest: async () =>
+      updateRelease({
+        asset: { name: 'dsh-retry-7.9.0.tgz', size: payload.length, digest, url: 'https://example.invalid/dsh-retry-7.9.0.tgz' },
+      }),
+    fetchImpl: async () => new Response(payload),
+    prepare: () => ({
+      sourceDir: path.join(paths.resources, 'unpacked'),
+      manifest: { name: 'dsh-retry', version: '7.9.0', engines: { dsh: '>=0.3.0 <0.4.0' } },
+      cleanup: () => {},
+    }),
+    install: () => ({ version: '7.9.0' }),
+  });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 200);
+  assert.match(readTail(paths.buildLog, 10).join('\n'), /skipping engine check: desktop version is unavailable/);
+});
+
+test('update route skips the install when already current', async () => {
+  const paths = makePaths();
+  const { handler, updating } = createUpdateHandlers({
+    logger: quietLogger,
+    fetchLatest: async () => updateRelease({ version: PACKAGE_VERSION, tag: `v${PACKAGE_VERSION}` }),
+    install: () => assert.fail('an up-to-date plugin must not install'),
+  });
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true, updateAvailable: false, current: { version: PACKAGE_VERSION } });
+  assert.equal(fs.existsSync(paths.updatePending), false);
+  assert.equal(updating.value, false);
+});
+
+test('update route rejects non-POST installs and cross-origin requests', async () => {
+  const { handler } = createUpdateHandlers({
+    logger: quietLogger,
+    fetchLatest: async () => assert.fail('a rejected request must not hit the network'),
+  });
+
+  const notPost = fakeResponse();
+  await handler({ method: 'PUT', headers: {} }, notPost, makePaths());
+  assert.equal(notPost.statusCode, 405);
+  assert.deepEqual(notPost.body, { ok: false, error: 'method_not_allowed' });
+
+  const cross = fakeResponse();
+  await handler(request({ headers: { 'sec-fetch-site': 'cross-site' } }), cross, makePaths());
+  assert.equal(cross.statusCode, 403);
+  assert.deepEqual(cross.body, { ok: false, error: 'cross_origin_request' });
+
+  const notDesktop = fakeResponse();
+  await handler(request(), notDesktop, null);
+  assert.equal(notDesktop.statusCode, 409);
+  assert.deepEqual(notDesktop.body, { ok: false, error: 'not_desktop' });
+});
+
+test('update route reports a failed install with 502 and frees the latch', async () => {
+  const paths = makePaths();
+  const payload = Buffer.from('bad install');
+  const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`;
+  let cleanups = 0;
+  const { handler, updating } = createUpdateHandlers({
+    tmpDir: fs.mkdtempSync(path.join(root, 'tmp-')),
+    fetchLatest: async () =>
+      updateRelease({
+        asset: { name: 'dsh-retry-7.9.0.tgz', size: payload.length, digest, url: 'https://example.invalid/dsh-retry-7.9.0.tgz' },
+      }),
+    fetchImpl: async () => new Response(payload),
+    prepare: () => ({
+      sourceDir: path.join(paths.resources, 'unpacked'),
+      manifest: { name: 'dsh-retry', version: '7.9.0' },
+      cleanup: () => {
+        cleanups += 1;
+      },
+    }),
+    install: () => {
+      throw new Error('install exploded');
+    },
+  });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 502);
+  assert.deepEqual(res.body, { ok: false, error: 'update_failed', detail: 'install exploded' });
+  assert.equal(updating.value, false);
+  assert.equal(cleanups, 1);
+  assert.equal(fs.existsSync(paths.updatePending), false);
+  assert.match(readTail(paths.buildLog, 10).join('\n'), /update failed: /);
+});
+
+test('restart route refuses to run while a self-update is pending', async () => {
+  const paths = makePaths();
+  fs.writeFileSync(paths.updatePending, JSON.stringify({ version: '7.9.0', installedAt: 'x' }));
+  const { handler, restarting } = createRestartHandler({
+    launch: () => assert.fail('a pending update must not start the helper'),
+    logger: quietLogger,
+  });
+
+  const res = fakeResponse();
+  await handler(request(), res, paths);
+  assert.equal(res.statusCode, 409);
+  assert.deepEqual(res.body, {
+    ok: false,
+    error: 'update_pending',
+    detail: 'update installed; restart the app to finish',
+  });
+  assert.equal(restarting.value, false);
+});
+
+test('ensureInstalled clears the update marker once the new version runs', () => {
+  const paths = makePaths();
+  fs.writeFileSync(paths.updatePending, JSON.stringify({ version: PACKAGE_VERSION, installedAt: 'x' }));
+
+  const result = ensureInstalled(paths, silentLog(), { launch: () => assert.fail('must not launch') });
+  assert.equal(result.status, 'nothing_to_stage');
+  assert.equal(fs.existsSync(paths.updatePending), false);
+});
+
+test('ensureInstalled keeps the update marker while the installed version is older', () => {
+  const paths = makePaths();
+  fs.writeFileSync(paths.updatePending, JSON.stringify({ version: '9.9.9', installedAt: 'x' }));
+
+  ensureInstalled(paths, silentLog(), { launch: () => assert.fail('must not launch') });
+  assert.equal(fs.existsSync(paths.updatePending), true);
+});
+
+test('statusPayload exposes the pending self-update marker', () => {
+  const paths = makePaths();
+  fs.writeFileSync(paths.updatePending, JSON.stringify({ version: '7.9.0', installedAt: 'x' }));
+
+  const status = statusPayload(paths);
+  assert.equal(status.update.currentVersion, PACKAGE_VERSION);
+  assert.deepEqual(status.update.pending, { version: '7.9.0', installedAt: 'x' });
 });

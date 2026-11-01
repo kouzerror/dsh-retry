@@ -1,6 +1,6 @@
 {
   "name": "dsh-retry",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Adds a native “Restart DeepSeek Harness” entry to the Windows tray menu and the account menu, plus an official settings page that survives DSH updates.",
   "type": "module",
   "main": "./lib/index.js",
@@ -33,7 +33,7 @@
     "dsh": ">=0.2.0-rc.1 <0.3.0-0"
   },
   "scripts": {
-    "test": "node --test test/asar.test.js test/patch.test.js test/desktop-helper.test.js test/index.test.js test/restart-route.test.js test/client.test.js",
+    "test": "node --test test/asar.test.js test/patch.test.js test/desktop-helper.test.js test/update.test.js test/index.test.js test/restart-route.test.js test/client.test.js",
     "check": "node scripts/check-syntax.mjs",
     "build": "node scripts/build-patched.mjs",
     "verify": "node scripts/verify-patched.mjs"

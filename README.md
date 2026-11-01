@@ -21,7 +21,9 @@
 - [验证安装](#验证安装)
 - [排障](#排障)
 - [开发](#开发)
+- [插件自更新](#插件自更新)
 - [兼容性与安全](#兼容性与安全)
+- [插件自更新](#插件自更新)
 - [版本与同步](#版本与同步)
 - [License](#license)
 
@@ -40,6 +42,8 @@
 > 0.5.0 起加了一层**设置页保险**：设置页走 DSH 官方的客户端 slot，不依赖 `app.asar` 补丁 —— **DSH 更新把补丁抹掉时，设置页入口依然在**，任何一次更新后都能用它重启；托盘与账户菜单在补丁自动重装后恢复。
 >
 > 0.5.1 起移除侧栏页脚的重复按钮（用户反馈与设置页重复），只保留设置页作为免补丁入口。
+>
+> 0.6.0 起支持**插件自更新**：设置页「插件更新」卡片直接拉 GitHub Releases 里的 tgz，校验 sha256 后安装到 profile，再引导重启一次 DSH 生效；同时加了 tag 驱动的 GitHub Actions 发布流水线，tag 与 package.json 版本不一致会直接失败。
 
 ## 双入口设计
 
@@ -52,7 +56,7 @@ DSH 桌面端没有开放托盘菜单与账户菜单的插件扩展点（见下�
 | patch | `lib/patch.js` + `scripts/restart-helper.ps1` | 改写 `app.asar` 内的托盘 / 账户菜单 | 是 |
 
 - **client 半**注册 `settings.section`（id `dsh-retry`，order 95），只 `require('react')`，不引官方 UI 包，只用 `ctx.slots` 公开 API；样式用 `--dsw-alias-*` 主题变量并对缺失变量给 fallback，按钮文字色用 `--dsw-alias-label-primary-inverted`，深浅色主题下都保持对比度。
-- **host 半**提供 `/dsh-retry/status`、`/dsh-retry/prepare`、`/dsh-retry/restart` 三条同源路由，设置页入口和账户菜单都调它。
+- **host 半**提供 `/dsh-retry/status`、`/dsh-retry/prepare`、`/dsh-retry/restart`、`/dsh-retry/update` 四条同源路由，设置页入口和账户菜单都调它。
 - 因此即使补丁因任何原因缺失，用户仍然**随时能重启**；补丁只决定「托盘和账户菜单里有没有那两项」。
 
 新增客户端 bundle 只需要在 `package.json` 里声明，`cordis.patch.yml` 不用改：
@@ -135,7 +139,7 @@ sequenceDiagram
 cd "$env:USERPROFILE\.dsh\profiles\desktop"
 pnpm add file:C:\path\to\dsh-retry
 # 或从 Release 下载后安装
-pnpm add file:C:\path\to\dsh-retry-0.5.1.tgz
+pnpm add file:C:\path\to\dsh-retry-0.6.0.tgz
 
 # 然后在 DSH 设置 → 插件中启用 dsh-retry
 ```
@@ -144,7 +148,7 @@ pnpm add file:C:\path\to\dsh-retry-0.5.1.tgz
 
 安装完成后：**托盘 → 退出 DeepSeek Harness，再重新打开**。首次启动会把新的客户端 bundle 加载进渲染进程，设置页入口立即出现；同一实例约 3 秒后会自动重启一次 DSH 把补丁装进 `app.asar`，重启后托盘与账户菜单也一并就位。
 
-> 从 0.4.x 升级到 0.5.x 同样需要一次完整重启：`dsh.client` 声明在插件安装后才被 client-modules 读取。客户端 bundle 在 DSH 启动时组合并缓存，升级到 0.5.1 后也**必须重启一次 DSH**（刷新页面不会重新拉取 bundle）。
+> 从 0.4.x 升级到 0.5.x 同样需要一次完整重启：`dsh.client` 声明在插件安装后才被 client-modules 读取。客户端 bundle 在 DSH 启动时组合并缓存，升级到 0.6.0 后也**必须重启一次 DSH**（刷新页面不会重新拉取 bundle）。
 
 ## 验证安装
 
@@ -157,7 +161,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 
 ```json
 {
-  "plugin": { "version": "0.5.1" },
+  "plugin": { "version": "0.6.0" },
   "desktopVersion": "0.2.1-rc.5",
   "patched": true,
   "mainPatched": true,
@@ -172,7 +176,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 
 `foreignPatch.detected` 为 true 说明 `app.asar` 被别的插件改过（与 `install-record.json`/原始备份的大小不一致），此时插件会暂停自动覆盖并在设置页给出提示——生态里有多个插件同样改写 `lib/main.js`，互相覆盖会丢功能，详见 [docs/conflict-audit.md](docs/conflict-audit.md)。`patched: true` 且两个 `missing` 为空，表示两处补丁都已生效；`writeAccess` 为 false 时说明当前用户改不了 `resources` 目录，安装/重启会返回 503；`autoRestart.guard` 记录当前已安装构建用掉的自动重启次数（上限 `limit`），非 null 说明这次安装已经自动重启过；guard 文件损坏时 `autoRestart` 不会自愈，`restart.log` 会写明 `auto-restart disabled`，删掉 `restart-guard.json` 即可重新启用。`staged.meta` 里 `source*` 描述补丁的来源 asar、`expected*` 永远描述 live asar（helper 校验的正是它）。
 
-设置页入口的检查更直接：设置 → 重启与更新（左栏倒数第二项）。只要插件处于启用状态就会出现，**不需要 `patched: true`**；没出现时先确认 DSH 是完整重启过（不是刷新窗口），再看设置 → 插件里 `dsh-retry` 的 bundle 是否是 0.5.1。
+设置页入口的检查更直接：设置 → 重启与更新（左栏倒数第二项）。只要插件处于启用状态就会出现，**不需要 `patched: true`**；没出现时先确认 DSH 是完整重启过（不是刷新窗口），再看设置 → 插件里 `dsh-retry` 的 bundle 是否是 0.6.0。
 
 ## 排障
 
@@ -182,7 +186,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 | `patched: false`，`missing` 非空 | 启动后约 3 秒会自动重启一次装补丁；若反复不生效，看 `autoRestart.guard.attempts` 是否已到上限（`limit`） |
 | 自动重启后仍无入口 | 查看 `resources\dsh-retry-build\restart-helper.log` 与 `restart.log` |
 | 补丁后 DSH 升级，入口消失 | 预期行为；新版本首次启动会自动重启一次，重启后恢复。设置页入口不受影响，随时可用它重启 |
-| 设置页入口不出现 | 确认整机重启过 DSH（客户端 bundle 只在启动时加载）；检查设置 → 插件里 dsh-retry 是否为 0.5.1、是否启用 |
+| 设置页入口不出现 | 确认整机重启过 DSH（客户端 bundle 只在启动时加载）；检查设置 → 插件里 dsh-retry 是否为 0.6.0、是否启用 |
 | `autoRestart.guard.attempts` 到上限 | 说明补丁连续安装失败，已停止自动重启以免循环；修好根因后删除 `resources\dsh-retry-build\restart-guard.json` 再启动 |
 | `restart.log` 出现 `auto-restart disabled` | `restart-guard.json` 损坏，插件按 fail-closed 停止自愈；删除该文件后重启 DSH 即恢复 |
 | `foreignPatch.detected: true` | 检测到别的插件改过 `app.asar`，自动安装已暂停；确认要覆盖时用设置页的「仍然覆盖并重启」（`POST /dsh-retry/restart?force=1`） |
@@ -240,9 +244,28 @@ test/              node:test 测试（asar 读写、补丁幂等、路径/参数
 - 确认要覆盖时用设置页的「仍然覆盖并重启」，或 `POST /dsh-retry/restart?force=1`。
 - 检测基于大小比对，等长重打包识别不出来；完整的冲突矩阵与各插件影响面见 [docs/conflict-audit.md](docs/conflict-audit.md)。
 
+## 插件自更新
+
+设置 → 重启与更新 →「插件更新」卡片：
+
+1. 点 **检查更新** → 插件向 `https://api.github.com/repos/kouzerror/dsh-retry/releases/latest` 取最新 release（10 分钟进程内缓存，只有手动点击才会请求，不会在每次打开设置页时打网络）。
+2. 有新版本时出现 **安装更新** → 下载 release 里的 `dsh-retry-<version>.tgz`（流式写入临时目录），按 GitHub 给出的 `digest`（`sha256:<hex>`）与字节数校验，**校验不过直接删掉不安装**；校验通过后用系统 `tar.exe` 解包，逐文件「临时名 → rename」原子覆盖 profile 里的插件目录（`lib/`、`scripts/`、`cordis.patch.yml`、`README.md`、`LICENSE`、`package.json`）。
+3. 安装后插件写 `resources\dsh-retry-build\update-pending.json`；此时 `/dsh-retry/restart` 会返回 `409 update_pending`，因为**新的客户端 bundle 必须靠一次完整的 DSH 重启才会被 client-modules 重新组合**（这是有意为之：避免用 helper 混着新旧版本重启）。卡片上会出现 **重启 DSH 以完成更新**，用设置 → 退出或托盘退出即可，下次启动插件会自己清掉这个 marker。
+
+接口（同源、需要 DSH 桌面端）：
+
+```http
+GET  /dsh-retry/update    → { ok, current: { version }, latest: { version, tag, publishedAt, htmlUrl, notes, asset } | null, updateAvailable, error? }
+POST /dsh-retry/update    → 200 { ok: true, installed: { from, to }, restartRequired: true } | 409 update_in_progress / incompatible_update / not_desktop | 502 update_failed
+```
+
+安装前会做**引擎守卫**：读新包 `package.json` 的 `engines.dsh` / `engines.node`，与当前桌面端版本（`/dsh-retry/status` 的 `desktopVersion`）比对，不满足返回 `409 incompatible_update` 且不安装；版本信息拿不到或范围写法不认识时放行并写日志，不会因为守卫误判而卡住更新。
+
+已知边界：GitHub 未认证 API 限流 60 次/小时（超限时卡片显示"检查失败"，稍后再试即可）；release 资产不带 `digest` 时退化为只校验字节数；自更新只升不降，失败不回滚已替换的文件（下一次安装会覆盖）。
+
 ## 版本与同步
 
-每次插件更新都会：提交并推送代码 → 打 tag → 发布 GitHub Release（`dsh-retry-<version>.tgz`）。
+每次插件更新都会：提交并推送代码 → 打 tag → 由 GitHub Actions 自动跑测试、`npm pack` 并建 Release（`dsh-retry-<version>.tgz`）。流水线在 `.github/workflows/release.yml`，tag 与 `package.json` 的 `version` 不一致会直接失败；手工发版兜底步骤见 [docs/release.md](docs/release.md)。
 
 - 仓库：https://github.com/kouzerror/dsh-retry
 - 插件市场：https://awesome-dsh-plugin.com/p/kouzerror/dsh-retry/ （awesome-dsh-plugin 目录收录，按本仓库源码安装，发版后自动提示更新）
