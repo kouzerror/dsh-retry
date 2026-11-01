@@ -139,7 +139,7 @@ sequenceDiagram
 cd "$env:USERPROFILE\.dsh\profiles\desktop"
 pnpm add file:C:\path\to\dsh-retry
 # 或从 Release 下载后安装
-pnpm add file:C:\path\to\dsh-retry-0.6.0.tgz
+pnpm add file:C:\path\to\dsh-retry-0.6.1.tgz
 
 # 然后在 DSH 设置 → 插件中启用 dsh-retry
 ```
@@ -148,7 +148,7 @@ pnpm add file:C:\path\to\dsh-retry-0.6.0.tgz
 
 安装完成后：**托盘 → 退出 DeepSeek Harness，再重新打开**。首次启动会把新的客户端 bundle 加载进渲染进程，设置页入口立即出现；同一实例约 3 秒后会自动重启一次 DSH 把补丁装进 `app.asar`，重启后托盘与账户菜单也一并就位。
 
-> 从 0.4.x 升级到 0.5.x 同样需要一次完整重启：`dsh.client` 声明在插件安装后才被 client-modules 读取。客户端 bundle 在 DSH 启动时组合并缓存，升级到 0.6.0 后也**必须重启一次 DSH**（刷新页面不会重新拉取 bundle）。
+> 从 0.4.x 升级到 0.5.x 同样需要一次完整重启：`dsh.client` 声明在插件安装后才被 client-modules 读取。客户端 bundle 在 DSH 启动时组合并缓存，升级到 0.6.1 后也**必须重启一次 DSH**（刷新页面不会重新拉取 bundle）。
 
 ## 验证安装
 
@@ -161,7 +161,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 
 ```json
 {
-  "plugin": { "version": "0.6.0" },
+  "plugin": { "version": "0.6.1" },
   "desktopVersion": "0.2.1-rc.5",
   "patched": true,
   "mainPatched": true,
@@ -176,7 +176,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 
 `foreignPatch.detected` 为 true 说明 `app.asar` 被别的插件改过（与 `install-record.json`/原始备份的大小不一致），此时插件会暂停自动覆盖并在设置页给出提示——生态里有多个插件同样改写 `lib/main.js`，互相覆盖会丢功能，详见 [docs/conflict-audit.md](docs/conflict-audit.md)。`patched: true` 且两个 `missing` 为空，表示两处补丁都已生效；`writeAccess` 为 false 时说明当前用户改不了 `resources` 目录，安装/重启会返回 503；`autoRestart.guard` 记录当前已安装构建用掉的自动重启次数（上限 `limit`），非 null 说明这次安装已经自动重启过；guard 文件损坏时 `autoRestart` 不会自愈，`restart.log` 会写明 `auto-restart disabled`，删掉 `restart-guard.json` 即可重新启用。`staged.meta` 里 `source*` 描述补丁的来源 asar、`expected*` 永远描述 live asar（helper 校验的正是它）。
 
-设置页入口的检查更直接：设置 → 重启与更新（左栏倒数第二项）。只要插件处于启用状态就会出现，**不需要 `patched: true`**；没出现时先确认 DSH 是完整重启过（不是刷新窗口），再看设置 → 插件里 `dsh-retry` 的 bundle 是否是 0.6.0。
+设置页入口的检查更直接：设置 → 重启与更新（左栏倒数第二项）。只要插件处于启用状态就会出现，**不需要 `patched: true`**；没出现时先确认 DSH 是完整重启过（不是刷新窗口），再看设置 → 插件里 `dsh-retry` 的 bundle 是否是 0.6.1。
 
 ## 排障
 
@@ -186,7 +186,7 @@ Invoke-RestMethod http://127.0.0.1:<port>/dsh-retry/status | ConvertTo-Json
 | `patched: false`，`missing` 非空 | 启动后约 3 秒会自动重启一次装补丁；若反复不生效，看 `autoRestart.guard.attempts` 是否已到上限（`limit`） |
 | 自动重启后仍无入口 | 查看 `resources\dsh-retry-build\restart-helper.log` 与 `restart.log` |
 | 补丁后 DSH 升级，入口消失 | 预期行为；新版本首次启动会自动重启一次，重启后恢复。设置页入口不受影响，随时可用它重启 |
-| 设置页入口不出现 | 确认整机重启过 DSH（客户端 bundle 只在启动时加载）；检查设置 → 插件里 dsh-retry 是否为 0.6.0、是否启用 |
+| 设置页入口不出现 | 确认整机重启过 DSH（客户端 bundle 只在启动时加载）；检查设置 → 插件里 dsh-retry 是否为 0.6.1、是否启用 |
 | `autoRestart.guard.attempts` 到上限 | 说明补丁连续安装失败，已停止自动重启以免循环；修好根因后删除 `resources\dsh-retry-build\restart-guard.json` 再启动 |
 | `restart.log` 出现 `auto-restart disabled` | `restart-guard.json` 损坏，插件按 fail-closed 停止自愈；删除该文件后重启 DSH 即恢复 |
 | `foreignPatch.detected: true` | 检测到别的插件改过 `app.asar`，自动安装已暂停；确认要覆盖时用设置页的「仍然覆盖并重启」（`POST /dsh-retry/restart?force=1`） |
