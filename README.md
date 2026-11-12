@@ -1,13 +1,13 @@
 # dsh-retry
 
-**给 DeepSeek Harness 桌面端加一个真正的「重启」入口 —— 托盘菜单、账户菜单，外加设置页里不依赖补丁的官方入口。原生样式、原生位置。**
+**给 DeepSeek Harness 桌面端加一个真正的「重启」入口 —— 托盘菜单、应用菜单、账户菜单，外加设置页里不依赖补丁的官方入口。原生样式、原生位置。**
 
 [![CI](https://github.com/kouzerror/dsh-retry/actions/workflows/ci.yml/badge.svg)](https://github.com/kouzerror/dsh-retry/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kouzerror/dsh-retry?include_prereleases&sort=semver)](https://github.com/kouzerror/dsh-retry/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![dsh plugin market](https://img.shields.io/badge/dsh%20plugin%20market-listed-2f6feb)](https://awesome-dsh-plugin.com/p/kouzerror/dsh-retry/)
 
-> Adds a native *Restart DeepSeek Harness* action to the Windows tray menu and the account menu, plus an official settings page that keeps working after a DSH update.
+> Adds a native *Restart DeepSeek Harness* action to the Windows tray menu, the application menu and the account menu, plus an official settings page that keeps working after a DSH update.
 
 ---
 
@@ -32,6 +32,7 @@
 | 入口 | 位置 | 类型 |
 | --- | --- | --- |
 | 🐳 系统托盘 | 右下角小鲸鱼图标 → 右键菜单 | 核心补丁：与「打开 / 退出 DeepSeek Harness」并列的原生菜单项 |
+| 📋 应用菜单 | 左上角「应用」→ 菜单末端 | 核心补丁：与「退出 DeepSeek Harness」并列的原生菜单项 |
 | 👤 账户菜单 | 左下角头像 → 弹出菜单 | 核心补丁：与「设置 / 意见反馈 / 退出登录」并列的原生菜单项（带刷新图标） |
 | ⚙️ 设置页 | 设置 → 重启与更新 | 官方 slot：重启按钮 + 补丁状态面板（版本、缺失补丁、自动重启次数、helper 日志） |
 
@@ -47,13 +48,13 @@
 
 ## 双入口设计
 
-DSH 桌面端没有开放托盘菜单与账户菜单的插件扩展点（见下节），但它的渲染进程有官方 slot API，插件自己的客户端 bundle 不放在 `app.asar` 里 —— 插件安装在 profile 目录，DSH 升级不会覆盖它。于是 dsh-retry 分成两半：
+DSH 桌面端没有开放托盘菜单、应用菜单与账户菜单的插件扩展点（见下节），但它的渲染进程有官方 slot API，插件自己的客户端 bundle 不放在 `app.asar` 里 —— 插件安装在 profile 目录，DSH 升级不会覆盖它。于是 dsh-retry 分成两半：
 
 | 半 | 文件 | 运行位置 | 依赖补丁 |
 | --- | --- | --- | --- |
 | host | `lib/index.js` | DSH 宿主进程（cordis） | 否 |
 | client | `lib/client.js` | 渲染进程，经 `dsh.client` 声明由 client-modules 加载 | 否 |
-| patch | `lib/patch.js` + `scripts/restart-helper.ps1` | 改写 `app.asar` 内的托盘 / 账户菜单 | 是 |
+| patch | `lib/patch.js` + `scripts/restart-helper.ps1` | 改写 `app.asar` 内的托盘 / 应用 / 账户菜单 | 是 |
 
 - **client 半**注册 `settings.section`（id `dsh-retry`，order 95），只 `require('react')`，不引官方 UI 包，只用 `ctx.slots` 公开 API；样式用 `--dsw-alias-*` 主题变量并对缺失变量给 fallback，按钮文字色用 `--dsw-alias-label-primary-inverted`，深浅色主题下都保持对比度。
 - **host 半**提供 `/dsh-retry/status`、`/dsh-retry/prepare`、`/dsh-retry/restart`、`/dsh-retry/update` 四条同源路由，设置页入口和账户菜单都调它。
@@ -70,13 +71,13 @@ DSH 桌面端没有开放托盘菜单与账户菜单的插件扩展点（见下�
 
 ## 为什么需要核心补丁
 
-DeepSeek Harness 桌面端的托盘菜单与账户菜单都硬编码在安装目录的 `resources/app.asar` 里，没有向插件开放的 slot，也没有 quit/restart IPC：
+DeepSeek Harness 桌面端的托盘菜单、应用菜单与账户菜单都硬编码在安装目录的 `resources/app.asar` 里，没有向插件开放的 slot，也没有 quit/restart IPC：
 
 - 托盘菜单：`lib/main.js` 中的 `DesktopTray`，菜单模板写死为「打开 / 分隔线 / 退出」
+- 应用菜单：`lib/main.js` 中的 `applicationItems`，重启项只在 `development` 分支里出现，打包版整段消失
 - 账户菜单：`dsh/node_modules/@deepseek-ai/dsh-client-ui-settings-account` 中的 `AccountMenu`，`items` 是硬编码数组
-- 主进程菜单里的重启项只在 `!app.isPackaged` 的开发分支存在，打包版官方没有任何可点的重启入口
 
-所以 dsh-retry 不是“画一个按钮”，而是给这两个原生控件各加一个菜单项。代价也很明确：**DSH 桌面端升级会覆盖 `app.asar`，插件需要在下次启动时重新打补丁**（自动完成，见下）。
+所以 dsh-retry 不是“画一个按钮”，而是给这三个原生控件各加一个菜单项。代价也很明确：**DSH 桌面端升级会覆盖 `app.asar`，插件需要在下次启动时重新打补丁**（自动完成，见下）。
 
 ## 工作原理
 
@@ -208,7 +209,7 @@ npm run verify      # 对比原始 asar 与补丁版：条目/逐字节差异/�
 
 ```
 lib/asar.js        最小 asar 读写器（Electron 下用 original-fs 绕过 asar 虚拟层）
-lib/patch.js       托盘菜单 / 账户菜单 / 重启监听三处补丁（逐项幂等、锚点唯一断言）
+lib/patch.js       托盘菜单 / 应用菜单 / 账户菜单 / 重启监听四处补丁（逐项幂等、锚点唯一断言）
 lib/client.js      渲染进程 bundle：设置页重启面板（官方 slot，免补丁）
 lib/desktop.js     桌面端路径解析（exe、resources、staging、备份）
 lib/helper.js      PowerShell helper 参数构造与拉起
