@@ -138,7 +138,7 @@ test('statusPayload describes an unpatched live archive and its staged metadata'
   assert.equal(status.plugin.name, 'dsh-retry');
   assert.equal(status.desktopVersion, '0.3.0');
   assert.equal(status.patched, false);
-  assert.deepEqual(status.missing.main, ['enLabel', 'zhLabel', 'trayItem', 'watcher']);
+  assert.deepEqual(status.missing.main, ['enLabel', 'zhLabel', 'trayItem', 'watcher', 'appMenuItem']);
   assert.deepEqual(status.missing.account, ['item', 'handler', 'enLabel', 'zhLabel']);
   assert.equal(status.staged.path, paths.stagedAsar);
   assert.equal(status.staged.bytes, 6);

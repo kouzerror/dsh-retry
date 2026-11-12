@@ -14,7 +14,7 @@ const accountText = available ? extractEntry(BACKUP, ACCOUNT_ENTRY).toString('ut
 test('patchMain patches a pristine bundle and is idempotent', { skip: !available && 'no pristine app.asar' }, () => {
   const first = patchMain(mainText);
   assert.equal(first.changed, true);
-  assert.deepEqual(first.applied, ['enLabel', 'zhLabel', 'trayItem', 'watcher']);
+  assert.deepEqual(first.applied, ['enLabel', 'zhLabel', 'trayItem', 'appMenuItem', 'watcher']);
   assert.equal(first.missing.length, 0);
   const second = patchMain(first.text);
   assert.equal(second.changed, false);
@@ -45,6 +45,39 @@ test('patchAccount restores a missing menu item only', { skip: !available && 'no
   const result = patchAccount(half);
   assert.equal(result.changed, true);
   assert.deepEqual(result.applied, ['item']);
+});
+
+test('patchMain adds the application menu restart item above quit', { skip: !available && 'no pristine app.asar' }, () => {
+  const patched = patchMain(mainText).text;
+  assert.equal(patched.includes('/* appMenuRestart */'), true);
+  // 只插入一次，重复运行不会出现第二项
+  assert.equal(patched.match(/appMenuRestart/g).length, 1);
+  // 位置：hideCommands 之后、quit 之前
+  const hide = patched.indexOf('...hideCommands');
+  const restart = patched.indexOf('appMenuRestart');
+  const quit = patched.indexOf('role: "quit"');
+  assert.ok(hide > -1 && restart > hide && quit > restart);
+});
+
+test('patchMain completes a bundle missing only the application menu item', { skip: !available && 'no pristine app.asar' }, () => {
+  const patched = patchMain(mainText).text;
+  const withoutAppMenu = patched.replace(
+    '\t\t/* appMenuRestart */\n' +
+      '\t\t{\n' +
+      '\t\t\tlabel: currentDesktopLocale().messages.restartApplication,\n' +
+      '\t\t\tclick: () => {\n' +
+      '\t\t\t\tif (quitting) return;\n' +
+      '\t\t\t\tapp.relaunch();\n' +
+      '\t\t\t\tquitWithoutConfirmation();\n' +
+      '\t\t\t}\n' +
+      '\t\t},\n',
+    ''
+  );
+  assert.notEqual(withoutAppMenu, patched);
+  const result = patchMain(withoutAppMenu);
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.applied, ['appMenuItem']);
+  assert.equal(result.text, patched);
 });
 
 test('unknown bundle shapes fail loudly instead of writing a partial patch', () => {

@@ -27,6 +27,16 @@ const ACCOUNT_SELECT_ANCHOR =
   '\t\t\t\t\t\t\t\tcontactUs();\n' +
   '\t\t\t\t\t\t\t} else if (id === "signin") beginSignIn();';
 
+/** The tail of applicationItems(): hide group, then quit. */
+const APP_MENU_TAIL =
+  '\t\t{ type: "separator" },\n' +
+  '\t\t...hideCommands,\n' +
+  '\t\t{\n' +
+  '\t\t\trole: "quit",\n' +
+  '\t\t\t...(win32 ? { label: messages.exitApplication } : {})\n' +
+  '\t\t}\n' +
+  '\t];';
+
 export function pristineMain() {
   return [
     'const en = {',
@@ -38,6 +48,11 @@ export function pristineMain() {
     'const menu = Menu.buildFromTemplate([',
     '\t{ label: messages.settings },',
     TRAY_QUIT_ANCHOR,
+    '',
+    'const applicationItems = () => [',
+    '\t{ label: messages.aboutMenu },',
+    '\t{ label: messages.checkUpdatesMenu },',
+    APP_MENU_TAIL,
     '',
     'let quitting = false;',
   ].join('\n');
