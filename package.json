@@ -1,6 +1,6 @@
 {
   "name": "dsh-retry",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Adds a native “Restart DeepSeek Harness” entry to the Windows tray menu and the account menu, plus an official settings page that survives DSH updates.",
   "type": "module",
   "main": "./lib/index.js",

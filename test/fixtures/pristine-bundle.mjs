@@ -1,7 +1,7 @@
-// A minimal but anchor-faithful copy of the two bundles dsh-retry patches.
-// Keeping the literals here (instead of importing them from lib/patch.js) makes
-// the fixture fail loudly when an anchor changes shape, which is the signal that
-// the patch strategy needs review rather than a silently green test run.
+// Fixtures that mirror the bundles dsh-retry patches, kept faithful to the
+// shapes shipped today: main.js is tab-indented source, while the settings
+// account client is a minified ESM bundle with backtick strings. A fixture that
+// no longer matches the real build is what makes these tests meaningful.
 import { ACCOUNT_ENTRY, MAIN_ENTRY, patchAccount, patchMain } from '../../lib/patch.js';
 import { writeAsar } from './write-asar.mjs';
 
@@ -13,19 +13,6 @@ const TRAY_QUIT_ANCHOR =
   '\t\t\t\t}\n' +
   '\t\t\t}\n' +
   '\t\t]));';
-
-const ACCOUNT_CONTACT_ITEM =
-  '\t\t\t\t\t\t\t{\n' +
-  '\t\t\t\t\t\t\t\tid: "contact",\n' +
-  '\t\t\t\t\t\t\t\tlabel: t("contactUs"),\n' +
-  '\t\t\t\t\t\t\t\ticon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPaperPlaneOutlineMedium, { size: 16 })\n' +
-  '\t\t\t\t\t\t\t},';
-
-const ACCOUNT_SELECT_ANCHOR =
-  '\t\t\t\t\t\t\t} else if (id === "contact") {\n' +
-  '\t\t\t\t\t\t\t\tsetOpen(false);\n' +
-  '\t\t\t\t\t\t\t\tcontactUs();\n' +
-  '\t\t\t\t\t\t\t} else if (id === "signin") beginSignIn();';
 
 export function pristineMain() {
   return [
@@ -43,24 +30,57 @@ export function pristineMain() {
   ].join('\n');
 }
 
+/** Minified client bundle, as DSH 0.2.2 ships it. */
 export function pristineAccount() {
+  return [
+    'const en={settings:`Settings`,contactUs:`Feedback`,menu:`Account menu`};',
+    'const zh={settings:`设置`,contactUs:`意见反馈`,menu:`账号菜单`};',
+    'const es={settings:`Configuración`,contactUs:`Comentarios`,menu:`Menú de cuenta`};',
+    'const fr={settings:`Paramètres`,contactUs:`Commentaires`,menu:`Menu du compte`};',
+    'const de={settings:`Einstellungen`,contactUs:`Rückmeldung`,menu:`Kontomenü`};',
+    'const ru={settings:`Настройки`,contactUs:`Обратная связь`,menu:`Меню аккаунта`};',
+    'const pt={settings:`Configurações`,contactUs:`Comentários`,menu:`Menu da conta`};',
+    'const items=[{id:`settings`,label:t(`settings`),icon:(0,react_jsx_runtime.jsx)' +
+      '(_deepseek_ai_dsh_client_ui_primitives.IconSettingsOutlineMedium,{size:16})},' +
+      '{id:`contact`,label:t(`contactUs`),icon:(0,react_jsx_runtime.jsx)' +
+      '(_deepseek_ai_dsh_client_ui_primitives.IconPaperPlaneOutlineMedium,{size:16})},' +
+      '...signedIn?[]:[]];',
+    'const onSelect=id=>{if(id===`settings`){setOpen(false);openSettings()}' +
+      'else if(id===`contact`){setOpen(false);contactUs()}' +
+      'else if(id===`signin`)beginSignIn();else requestSignOut()};',
+  ].join('\n');
+}
+
+/** Pretty-printed client bundle, as every DSH release before 0.2.2 shipped it. */
+export function legacyAccount() {
   return [
     'const en = {',
     '\t\t\tsettings: "Settings",',
+    '\t\t\tcontactUs: "Feedback",',
     '};',
     'const zh = {',
     '\t\t\tsettings: "设置",',
+    '\t\t\tcontactUs: "意见反馈",',
     '};',
     'function renderItems() {',
     '\t\t\treturn [',
     '\t\t\t\t...(0, react_jsx_runtime.jsxs)(Fragment, { children: [',
-    ACCOUNT_CONTACT_ITEM,
+    '\t\t\t\t\t{',
+    '\t\t\t\t\t\tid: "contact",',
+    '\t\t\t\t\t\tlabel: t("contactUs"),',
+    '\t\t\t\t\t\ticon: (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.IconPaperPlaneOutlineMedium, { size: 16 })',
+    '\t\t\t\t\t},',
     '\t\t\t\t] }),',
     '\t\t\t];',
     '}',
     'function onSelect(id) {',
-    '\t\t\tif (id === "signin") beginSignIn();',
-    ACCOUNT_SELECT_ANCHOR,
+    '\t\t\tif (id === "settings") {',
+    '\t\t\t\tsetOpen(false);',
+    '\t\t\t\topenSettings();',
+    '\t\t\t} else if (id === "contact") {',
+    '\t\t\t\tsetOpen(false);',
+    '\t\t\t\tcontactUs();',
+    '\t\t\t} else if (id === "signin") beginSignIn();',
     '}',
   ].join('\n');
 }
